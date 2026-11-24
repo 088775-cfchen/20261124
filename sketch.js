@@ -17,9 +17,17 @@ let activeEffects = []; // 儲存目前畫面上飛行中的魔法特效
 let char2StopSprite; // 儲存角色二的待機精靈圖 2/stop/stop.png
 let char2ActionSprite; // 儲存角色二的互動精靈圖 2/action/action.png
 
-// 數學題目相關變數
+// 數學題目與作答狀態變數
 let wasChar1Near = false; // 記錄上一幀角色一是否接近角色二
 let currentMathQuestion = null; // 儲存目前的數學加法選擇題
+let optionButtons = []; // 儲存畫面上四個選項按鈕的座標範圍
+let selectedOptionIndex = -1; // 記錄使用者選擇的選項索引（-1 代表尚未作答）
+let answerResult = null; // 記錄作答結果（'correct' | 'wrong' | null）
+
+// 特效狀態變數（煙火與閃電）
+let fireworks = []; // 儲存煙火粒子陣列
+let lightningBolts = []; // 儲存閃電路徑陣列
+let lightningFlashAlpha = 0; // 閃電全螢幕閃光透明度
 
 const frameCountInSprite = 10; // 設定精靈圖包含的影格數
 const frameWidth = 139.5; // 設定每個影格的寬度（1395 除以 10）
@@ -70,11 +78,140 @@ function generateMathQuestion() { // 隨機產生一題數學加法選擇題
   }
 
   const options = shuffle(Array.from(optionsSet));
+  selectedOptionIndex = -1;
+  answerResult = null;
   return {
     question: `${a} + ${b} = ?`,
     options: options,
     answer: answer
   };
+}
+
+function spawnFireworks() { // 產生全畫布多組煙火特效
+  const palette = [
+    [255, 70, 70],
+    [255, 215, 0],
+    [70, 255, 130],
+    [70, 190, 255],
+    [240, 100, 255],
+    [255, 140, 40]
+  ];
+  const burstCount = 7;
+  for (let b = 0; b < burstCount; b++) {
+    const cx = random(width * 0.12, width * 0.88);
+    const cy = random(height * 0.12, height * 0.55);
+    const col = random(palette);
+    const particleCount = 65;
+    for (let i = 0; i < particleCount; i++) {
+      const angle = random(TWO_PI);
+      const speed = random(2, 9);
+      fireworks.push({
+        x: cx,
+        y: cy,
+        vx: cos(angle) * speed,
+        vy: sin(angle) * speed,
+        r: col[0],
+        g: col[1],
+        b: col[2],
+        alpha: 255,
+        size: random(4, 8)
+      });
+    }
+  }
+}
+
+function triggerLightning() { // 產生全畫布閃電特效
+  lightningFlashAlpha = 210;
+  lightningBolts = [];
+  const boltCount = 3;
+  for (let b = 0; b < boltCount; b++) {
+    let curX = random(width * 0.15, width * 0.85);
+    let curY = 0;
+    const points = [{ x: curX, y: curY }];
+    while (curY < height * 0.88) {
+      curX += random(-45, 45);
+      curY += random(25, 55);
+      points.push({ x: curX, y: min(curY, height * 0.9) });
+    }
+    lightningBolts.push({
+      points: points,
+      alpha: 255
+    });
+  }
+}
+
+function submitAnswer(index) { // 處理使用者選擇某個選項後的判斷與特效觸發
+  if (!currentMathQuestion || answerResult !== null) return;
+  selectedOptionIndex = index;
+  const chosenValue = currentMathQuestion.options[index];
+  if (chosenValue === currentMathQuestion.answer) {
+    answerResult = "correct";
+    spawnFireworks();
+  } else {
+    answerResult = "wrong";
+    triggerLightning();
+  }
+}
+
+function updateAndDrawFireworks() { // 更新並繪製煙火粒子
+  if (fireworks.length === 0) return;
+  push();
+  noStroke();
+  for (let i = fireworks.length - 1; i >= 0; i--) {
+    const p = fireworks[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.12; // 重力效果
+    p.vx *= 0.985;
+    p.alpha -= 3.5;
+    if (p.alpha <= 0) {
+      fireworks.splice(i, 1);
+      continue;
+    }
+    fill(p.r, p.g, p.b, p.alpha);
+    circle(p.x, p.y, p.size);
+  }
+  pop();
+}
+
+function updateAndDrawLightning() { // 更新並繪製閃電特效
+  if (lightningFlashAlpha <= 0 && lightningBolts.length === 0) return;
+  push();
+  if (lightningFlashAlpha > 0) {
+    rectMode(CORNER);
+    noStroke();
+    fill(235, 240, 255, lightningFlashAlpha);
+    rect(0, 0, width, height);
+    lightningFlashAlpha = max(0, lightningFlashAlpha - 14);
+  }
+
+  noFill();
+  for (let i = lightningBolts.length - 1; i >= 0; i--) {
+    const bolt = lightningBolts[i];
+    // 外層紫色電光暈
+    stroke(160, 140, 255, bolt.alpha * 0.6);
+    strokeWeight(10);
+    beginShape();
+    for (const pt of bolt.points) {
+      vertex(pt.x, pt.y);
+    }
+    endShape();
+
+    // 內層亮白色閃電主幹
+    stroke(255, 255, 255, bolt.alpha);
+    strokeWeight(3.5);
+    beginShape();
+    for (const pt of bolt.points) {
+      vertex(pt.x, pt.y);
+    }
+    endShape();
+
+    bolt.alpha -= 10;
+    if (bolt.alpha <= 0) {
+      lightningBolts.splice(i, 1);
+    }
+  }
+  pop();
 }
 
 function setup() { // 初始化畫布與繪圖模式
@@ -229,6 +366,7 @@ function draw() { // 每個畫面更新一次背景與角色
   } // 結束飛行中特效更新迴圈
 
   // --- 當角色1接近角色2時，顯示上方透明度90的黃色數學選擇題方框 ---
+  optionButtons = [];
   if (isChar1Near && currentMathQuestion) {
     push();
     const boxW = width / 3; // 方框寬度為整個畫布寬的 1/3
@@ -243,33 +381,100 @@ function draw() { // 每個畫面更新一次背景與角色
     strokeWeight(2);
     rect(boxX, boxY, boxW, boxH, 12);
 
-    // 繪製題目與選項文字
+    // 繪製題目與作答結果提示
     fill(20);
     noStroke();
     textAlign(CENTER, CENTER);
 
-    const titleSize = constrain(min(boxW * 0.075, boxH * 0.1), 14, 26);
+    const titleSize = constrain(min(boxW * 0.07, boxH * 0.085), 13, 24);
     textSize(titleSize);
     textStyle(BOLD);
-    text("數學加法挑戰", width / 2, boxY + boxH * 0.14);
+    text("數學加法挑戰（點擊選項或按 A~D）", width / 2, boxY + boxH * 0.11);
 
-    const questionSize = constrain(min(boxW * 0.12, boxH * 0.16), 20, 42);
+    const questionSize = constrain(min(boxW * 0.11, boxH * 0.14), 18, 38);
     textSize(questionSize);
-    text(currentMathQuestion.question, width / 2, boxY + boxH * 0.34);
+    text(currentMathQuestion.question, width / 2, boxY + boxH * 0.25);
 
-    const optionSize = constrain(min(boxW * 0.08, boxH * 0.11), 15, 28);
+    if (answerResult !== null) {
+      const feedbackSize = constrain(min(boxW * 0.075, boxH * 0.085), 14, 24);
+      textSize(feedbackSize);
+      if (answerResult === "correct") {
+        fill(0, 140, 40);
+        text("答對了！太棒了！", width / 2, boxY + boxH * 0.37);
+      } else {
+        fill(200, 20, 20);
+        text(`答錯了！正確答案是 ${currentMathQuestion.answer}`, width / 2, boxY + boxH * 0.37);
+      }
+    }
+
+    // 繪製四個可點擊的選項按鈕
+    const optionSize = constrain(min(boxW * 0.075, boxH * 0.095), 14, 25);
     textSize(optionSize);
     textStyle(NORMAL);
     const labels = ["A", "B", "C", "D"];
+    const btnW = boxW * 0.72;
+    const btnH = boxH * 0.11;
+    const btnX = width / 2 - btnW / 2;
+
     for (let i = 0; i < currentMathQuestion.options.length; i++) {
-      const optionY = boxY + boxH * (0.52 + i * 0.11);
-      text(`(${labels[i]})  ${currentMathQuestion.options[i]}`, width / 2, optionY);
+      const btnY = boxY + boxH * (0.44 + i * 0.13);
+      const optVal = currentMathQuestion.options[i];
+      const isHovered =
+        mouseX >= btnX &&
+        mouseX <= btnX + btnW &&
+        mouseY >= btnY &&
+        mouseY <= btnY + btnH;
+
+      optionButtons.push({ x: btnX, y: btnY, w: btnW, h: btnH, index: i });
+
+      // 依作答與懸停狀態決定按鈕底色
+      if (answerResult !== null) {
+        if (optVal === currentMathQuestion.answer) {
+          fill(100, 230, 120, 220); // 正確答案顯示綠色
+        } else if (i === selectedOptionIndex) {
+          fill(255, 110, 110, 220); // 選錯的選項顯示紅色
+        } else {
+          fill(255, 255, 255, 160);
+        }
+      } else if (isHovered) {
+        fill(255, 255, 255, 235);
+      } else {
+        fill(255, 255, 255, 175);
+      }
+
+      stroke(150, 120, 0, 180);
+      strokeWeight(1.5);
+      rect(btnX, btnY, btnW, btnH, 8);
+
+      fill(20);
+      noStroke();
+      text(`(${labels[i]})  ${optVal}`, width / 2, btnY + btnH / 2);
     }
     pop();
   }
+
+  // 繪製全畫布煙火與閃電特效（置於最上層）
+  updateAndDrawFireworks();
+  updateAndDrawLightning();
 } // 結束繪圖函式
 
-function keyPressed() { // 按下方向鍵時切換角色狀態與朝向
+function mousePressed() { // 偵測滑鼠點擊選擇題選項
+  if (optionButtons.length > 0 && answerResult === null) {
+    for (const btn of optionButtons) {
+      if (
+        mouseX >= btn.x &&
+        mouseX <= btn.x + btn.w &&
+        mouseY >= btn.y &&
+        mouseY <= btn.y + btn.h
+      ) {
+        submitAnswer(btn.index);
+        break;
+      }
+    }
+  }
+}
+
+function keyPressed() { // 按下方向鍵、空白鍵或 A~D 選項鍵時處理事件
   if (keyCode === RIGHT_ARROW) { // 判斷是否按下右方向鍵
     isWalking = true; // 啟用走路動畫
     facingDirection = 1; // 讓角色面向右方
@@ -289,6 +494,15 @@ function keyPressed() { // 按下方向鍵時切換角色狀態與朝向
     spaceIsDown = true; // 記錄空白鍵已按住以避免連續觸發
     return false; // 防止空白鍵捲動網頁
   } // 結束空白鍵判斷
+
+  // 支援鍵盤按下 A, B, C, D 選擇答案
+  if (optionButtons.length > 0 && answerResult === null) {
+    const upperKey = key.toUpperCase();
+    const keyIndex = ["A", "B", "C", "D"].indexOf(upperKey);
+    if (keyIndex !== -1) {
+      submitAnswer(keyIndex);
+    }
+  }
 } // 結束按鍵事件處理函式
 
 function keyReleased() { // 鍵盤按鍵放開時更新按鍵狀態
